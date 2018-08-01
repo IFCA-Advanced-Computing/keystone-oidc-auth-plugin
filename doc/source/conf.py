@@ -38,7 +38,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'keystone-oidc-auth-plugin'
-copyright = u'2017, OpenStack Developers'
+copyright = u'2018, Spanish National Research Council (CSIC)'
 
 # openstackdocstheme options
 repository_name = 'IFCA/keystone-oidc-auth-plugin'
