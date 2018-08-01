@@ -14,8 +14,18 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import pbr.version
+from keystone.auth.plugins import mapped as ks_mapped
 
 
-__version__ = pbr.version.VersionInfo(
-    'keystone-oidc-auth-plugin').version_string()
+class OpenIDConnect(ks_mapped.Mapped):
+    """Provide OpenID Connect authentication.
+
+    This plugin subclasses ``mapped.Mapped``, and may be specified in
+    keystone.conf::
+
+        [auth]
+        methods = external,password,token,oidc
+        oidc = keystone_oidc_auth_plugin.auth.OpenIDConnect
+    """
+
+    pass

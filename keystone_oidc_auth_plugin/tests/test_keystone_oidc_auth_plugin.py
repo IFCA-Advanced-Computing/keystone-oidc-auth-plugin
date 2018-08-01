@@ -19,10 +19,22 @@ test_keystone_oidc_auth_plugin
 Tests for `keystone_oidc_auth_plugin` module.
 """
 
+import uuid
+
+import keystone.conf
+from keystone.tests.unit import test_auth_plugin as ks_test_auth_plugin
+from keystone.tests.unit.ksfixtures import auth_plugins
+
+import mock
+
 from keystone_oidc_auth_plugin.tests import base
 
 
-class TestKeystone_oidc_auth_plugin(base.TestCase):
+class TestKeystone_oidc_auth_plugin(ks_test_auth_plugin.TestMapped):
 
-    def test_something(self):
-        pass
+    def test_load_openid_ifca(self):
+        self.useFixture(auth_plugins.ConfigAuthPlugins(self.config_fixture,
+                                                       ["openid"],
+                                                       openid="ifca"))
+        self.useFixture(auth_plugins.LoadAuthPlugins("openid"))
+        self._test_mapped_invocation_with_method_name("openid")
