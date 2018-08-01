@@ -2,7 +2,7 @@
 keystone-oidc-auth-plugin
 ===============================
 
-Native OpenID Connect Implementeation for OpenStack Kesytone.
+OpenID Connect Implementeation for OpenStack Keystone.
 
 Please fill here a long description which must be at least 3 lines wrapped on
 80 cols, so that distribution package maintainers can use it in their packages.
