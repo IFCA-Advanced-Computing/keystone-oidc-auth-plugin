@@ -1,0 +1,6 @@
+[run]
+branch = True
+source = keystone_oidc_auth_plugin
+
+[report]
+ignore_errors = True
