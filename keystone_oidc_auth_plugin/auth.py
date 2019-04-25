@@ -15,22 +15,43 @@
 # under the License.
 
 from keystone.auth.plugins import mapped as ks_mapped
-from keystone.auth.plugins import mapped as ks_mapped
 from keystone.auth.plugins import base
 from keystone.common import provider_api
 from keystone import exception
 from keystone.federation import constants as federation_constants
 from keystone.federation import utils
+from keystone import notifications
+
+from pycadf import cadftaxonomy as taxonomy
 
 from oslo_log import log
+from oslo_config import cfg
+
 from oic.oic import Client
 from oic.utils.authn.client import CLIENT_AUTHN_METHOD
 from oic.utils.http_util import Redirect
 from oic import rndstr
 from oic.oic.message import AuthorizationResponse
 from oic.oic.message import ProviderConfigurationResponse
+from pymemcache.client.base import Client as Client_mem
+import keystone.conf
+import six
 import requests
 
+LOG = log.getLogger(__name__)
+
+CONF = keystone.conf.CONF
+PROVIDERS = provider_api.ProviderAPIs
+
+opts = [
+    cfg.DictOpt("iss",
+               default={},
+               help="OpenID connect issuer (identity_provider:iss)"),
+    cfg.DictOpt("client_id",
+               default={},
+               help="OpenID Connect client_id (identity_provider:client_id"),
+]
+CONF.register_opts(opts, group="oidc")
 
 class OpenIDConnect(ks_mapped.Mapped):
     """Provide OpenID Connect authentication.
@@ -43,54 +64,18 @@ class OpenIDConnect(ks_mapped.Mapped):
         oidc = keystone_oidc_auth_plugin.auth.OpenIDConnect
     """
     def authenticate(self, request, auth_payload):
-        LOG.debug("Request")
-        LOG.debug(request)
-        LOG.debug("Auth_payload")
-        LOG.debug(auth_payload)
-
-        LOG.debug("Estoy en authenticate debuggeando")
+        assertion = extract_assertion_data(request)
         #TODO Copied from mapped
         if 'id' in auth_payload:
-            LOG.debug("Estoy en id in auth_payload")
+            LOG.debug("No token received")
             token_ref = self._get_token_ref(auth_payload)
             response_data = handle_scoped_token(request,
                                                 token_ref,
                                                 PROVIDERS.federation_api,
                                                 PROVIDERS.identity_api)
         #TODO We need to change this. The first request won't have a Bearer, but this is for testing
-        elif 'Bearer' in str(request):
-            LOG.debug("Authorization Bearer received")
-            client = Client(client_authn_method=CLIENT_AUTHN_METHOD, verify_ssl=False)
-            #TODO provider should be provided by keystone config
-            op_info = ProviderConfigurationResponse(
-                      version="1.0", issuer="https://sso.ifca.es",
-                      authorization_endpoint="https://sso.ifca.es/auth/realms/master/protocol/openid-connect/auth")
-            provider_info = op_info
-            #provider_info = client.provider_config("https://sso.ifca.es/auth/realms/master")
-            session = {"nonce": rndstr(), "state": rndstr()}
-            #TODO some parameters should be provided by keystone config
-            args = {
-                "response_type": "code",
-                "client_id": "lifewatch-iam",
-                "authorization_endpoint": "https://sso.ifca.es/auth/realms/master/protocol/openid-connect/auth",
-                #    "client_secret": "hF_Cw596zGO_fs15ERl09-dM",
-                "redirect_uri": "http://vm009.pub.cloud.ifca.es:5000/v3/OS-FEDERATION/identity_providers/ifca-sso/protocols/oidc/auth",
-                "scope": ["openid", "profile", "email"],
-                "nonce": session["nonce"],
-                "state": session["state"],
-            }
-             LOG.debug("Request params: %s" % session["state"])
-            auth_req = client.construct_AuthorizationRequest(request_args=args)
-            client.client_id=args["client_id"]
-            LOG.debug("Client_id: %s" % client.client_id)
-            login_url = auth_req.request(client.authorization_endpoint)
-            LOG.debug(client)
-            LOG.debug("LOGIN URL %s" %login_url) #TODO esto se supone que hay que devolverselo al cliente de alguna manera
-
-            response_data={'URL'}
-         else:
-            #TODO This should handle the flow after the IdP returns the first answer. Maybe the method should be different.
-            LOG.debug("NO Estoy en id in auth_payload")
+        if 'Bearer' in assertion["HTTP_AUTHORIZATION"]:
+            LOG.debug("Bearer token received")
             response_data = handle_unscoped_token(request,
                                                   auth_payload,
                                                   PROVIDERS.resource_api,
@@ -98,23 +83,112 @@ class OpenIDConnect(ks_mapped.Mapped):
                                                   PROVIDERS.identity_api,
                                                   PROVIDERS.assignment_api,
                                                   PROVIDERS.role_api)
-            LOG.debug("Estoy response_data: %s", response_data)
-            return base.AuthiHandlerResponse(status=True, response_body=None,response_data=response_data)
+        else:
+            LOG.debug("Unknown request")
+
+        return base.AuthHandlerResponse(status=True, response_body=None,response_data=response_data)
+
 def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
                           identity_api, assignment_api, role_api):
+    def validate_shadow_mapping(shadow_projects, existing_roles, idp_domain_id,
+                                idp_id):
+        # Validate that the roles in the shadow mapping actually exist. If
+        # they don't we should bail early before creating anything.
+        for shadow_project in shadow_projects:
+            for shadow_role in shadow_project['roles']:
+                # The role in the project mapping must exist in order for it to
+                # be useful.
+                if shadow_role['name'] not in existing_roles:
+                    LOG.error(
+                        'Role %s was specified in the mapping but does '
+                        'not exist. All roles specified in a mapping must '
+                        'exist before assignment.',
+                        shadow_role['name']
+                    )
+                 # NOTE(lbragstad): The RoleNotFound exception usually
+                    # expects a role_id as the parameter, but in this case we
+                    # only have a name so we'll pass that instead.
+                    raise exception.RoleNotFound(shadow_role['name'])
+                role = existing_roles[shadow_role['name']]
+                if (role['domain_id'] is not None and
+                        role['domain_id'] != idp_domain_id):
+                    LOG.error(
+                        'Role %(role)s is a domain-specific role and '
+                        'cannot be assigned within %(domain)s.',
+                        {'role': shadow_role['name'], 'domain': idp_domain_id}
+                    )
+                    raise exception.DomainSpecificRoleNotWithinIdPDomain(
+                        role_name=shadow_role['name'],
+                        identity_provider=idp_id
+                    )
+
+    def create_projects_from_mapping(shadow_projects, idp_domain_id,
+                                     existing_roles, user, assignment_api,
+                                     resource_api):
+        for shadow_project in shadow_projects:
+            try:
+                # Check and see if the project already exists and if it
+                # does not, try to create it.
+                project = resource_api.get_project_by_name(
+                    shadow_project['name'], idp_domain_id
+                )
+            except exception.ProjectNotFound:
+                LOG.info(
+                    'Project %(project_name)s does not exist. It will be '
+                    'automatically provisioning for user %(user_id)s.',
+                    {'project_name': shadow_project['name'],
+                     'user_id': user['id']}
+                )
+                project_ref = {
+                    'id': uuid.uuid4().hex,
+                    'name': shadow_project['name'],
+                    'domain_id': idp_domain_id
+                }
+                project = resource_api.create_project(
+                    project_ref['id'],
+                    project_ref
+                )
+
+            shadow_roles = shadow_project['roles']
+            for shadow_role in shadow_roles:
+                assignment_api.create_grant(
+                    existing_roles[shadow_role['name']]['id'],
+                    user_id=user['id'],
+                    project_id=project['id']
+                )
+
+
+    def is_ephemeral_user(mapped_properties):
+        return mapped_properties['user']['type'] == utils.UserType.EPHEMERAL 
+
+    def build_ephemeral_user_context(user, mapped_properties,
+                                     identity_provider, protocol):
+        resp = {}
+        resp['user_id'] = user['id']
+        resp['group_ids'] = mapped_properties['group_ids']
+        resp[federation_constants.IDENTITY_PROVIDER] = identity_provider
+        resp[federation_constants.PROTOCOL] = protocol
+
+        return resp
+
+    def build_local_user_context(mapped_properties):
+        resp = {}
+        user_info = auth_plugins.UserAuthInfo.create(mapped_properties,
+                                                     METHOD_NAME)
+        resp['user_id'] = user_info.user_id
+
+        return resp
+
     assertion = extract_assertion_data(request)
-    LOG.debug("Estoy despues de extract_assertion_data con assertion: %s", assertion)
 
     #Target mapped????
     try:
         identity_provider = auth_payload['identity_provider']
-        LOG.debug("Estoy en Identity provider: %s",identity_provider)
     except KeyError:
         raise exception.ValidationError(
             attribute='identity_provider', target='mapped')
     try:
         protocol = auth_payload['protocol']
-        LOG.debug("Estoy en protocolr: %s",protocol)
     except KeyError:
         raise exception.ValidationError(
             attribute='protocol', target='mapped')
@@ -128,56 +202,94 @@ def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
     # possibility that it will be used in the CADF notification. This means
     # operation will not be mapped to any user (even ephemeral).
     user_id = None
+    client = Client(client_authn_method=CLIENT_AUTHN_METHOD)
+    #TODO it should go in the keystone config file.
+    args = { 
+         "iss" : CONF.oidc.iss[identity_provider],
+         "client_id": CONF.oidc.client_id[identity_provider]
+         }
+    client.client_id = args['client_id']
+    client.provider_config(args['iss'])
+    access_token = str(assertion["HTTP_AUTHORIZATION"])[str(assertion["HTTP_AUTHORIZATION"]).index('Bearer ') + len('Bearer '):]
+    userinfo = client.do_user_info_request(access_token=access_token)
+    assertion = {n: v.split(';') for n, v in userinfo.items()
+                     if isinstance(v, six.string_types)}
+    unique_id = assertion['sub']
+    display_name = assertion['name']
+    assertion = userinfo  
+    try:
+        try:
+            mapped_properties, mapping_id = apply_mapping_filter(
+                identity_provider, protocol, assertion, resource_api,
+                federation_api, identity_api)
+        except exception.ValidationError as e:
+            # if mapping is either invalid or yield no valid identity,
+            # it is considered a failed authentication
+            raise exception.Unauthorized(e)
 
-    #TODO we need a way to get the state, that is provided in the URL itself
-    #TODO if there is no state, then error
-    req = str(request)
-    if 'state' in req:
-        #TODO change this forma cutre de obtener state
-        state = req[req.find('state='):len(req)]
-        state = state[len('state='):state.find('&')]
-        client = Client(client_authn_method=CLIENT_AUTHN_METHOD, verify_ssl=False)
-        provider_info = client.provider_config("https://sso.ifca.es/auth/realms/master")
-        #TODO otra nhapa
-        if 'code' in req:
-            code = req[req.find('code='):len(req)]
-            code = code[len('code='):code.find('\'')]
+        if is_ephemeral_user(mapped_properties):
+            #TODO we need a way to get the state, that is provided in the URL itself
+            #TODO if there is no state, then error
+            user = identity_api.shadow_federated_user(identity_provider,
+                                                      protocol, unique_id,
+                                                      display_name)
 
-            args = {
-                "response_type": "code",
-                "client_id": "lifewatch-iam",
-                "authorization_endpoint": "https://sso.ifca.es/auth/realms/master/protocol/openid-connect/auth",
-                #    "client_secret": "hF_Cw596zGO_fs15ERl09-dM",
-                "redirect_uri": "http://vm009.pub.cloud.ifca.es:5000/v3/OS-FEDERATION/identity_providers/ifca-sso/protocols/oidc/auth",
-                "scope": ["openid", "profile", "email"],
-                "state": state
-              }
+            if 'projects' in mapped_properties:
+                idp_domain_id = federation_api.get_idp(
+                    identity_provider
+                )['domain_id']
+                existing_roles = {
+                    role['name']: role for role in role_api.list_roles()
+                }
+            # NOTE(lbragstad): If we are dealing with a shadow mapping,
+                # then we need to make sure we validate all pieces of the
+                # mapping and what it's saying to create. If there is something
+                # wrong with how the mapping is, we should bail early before we
+                # create anything.
+                validate_shadow_mapping(
+                    mapped_properties['projects'],
+                    existing_roles,
+                    idp_domain_id,
+                    identity_provider
+                )
+                create_projects_from_mapping(
+                    mapped_properties['projects'],
+                    idp_domain_id,
+                    existing_roles,
+                    user,
+                    assignment_api,
+                    resource_api
+                )
 
-            client.construct_AuthorizationRequest(request_args=args)
-            LOG.debug("GRAnt del client pyoidc: %s" % client.grant)
-            args = {
-                "code": code,
-                #"redirect_uri": ["https://lifewatch-iam.ifca.es/google"],
-                "client_id": "lifewatch-iam",
-                "client_secret": "183b338e-38b4-4a66-b28c-3279240281fd",
-                "scope": ["openid", "profile", "email"],
-                "state": state
-            }
-            resp = client.do_access_token_request(state=state,request_args=args, authn_method="client_secret_basic")
-            LOG.debug("After access token request:...............")
-            for i in resp:
-                LOG.debug("%s: %s" %(i, resp[i]))
-                #    token_response = client.do_access_token_request(scope="openid", state=aresp["state"], request_args=args,  authn_method="client_secret_basic")
-                #TODO introspection endpoint
-                #resp = client.do_access_token_request(scope='openid',state=session["state"], request_args=args, authn_method="client_secret_basic")
-                LOG.debug('##############################')
-                LOG.debug('User info request')
-                userinfo = client.do_user_info_request(schema="openid",state=aresp["state"],method="GET")
-                LOG.debug(userinfo)
-
+            user_id = user['id']
+            group_ids = mapped_properties['group_ids']
+            response_data = build_ephemeral_user_context(
+                user, mapped_properties, identity_provider, protocol)
+        else:
+            response_data = build_local_user_context(mapped_properties)
+    except Exception:
+        # NOTE(topol): Diaper defense to catch any exception, so we can
+        # send off failed authentication notification, raise the exception
+        # after sending the notification
+        outcome = taxonomy.OUTCOME_FAILURE
+        notifications.send_saml_audit_notification('authenticate',
+                                                   request,
+                                                   user_id, group_ids,
+                                                   identity_provider,
+                                                   protocol, token_id,
+                                                   outcome)
+        raise
     else:
+        outcome = taxonomy.OUTCOME_SUCCESS
+        notifications.send_saml_audit_notification('authenticate',
+                                                   request,
+                                                   user_id, group_ids,
+                                                   identity_provider,
+                                                   protocol, token_id,
+                                                   outcome)
 
-        return {'OS-FEDERATION:protocol': u'oidc', 'OS-FEDERATION:identity_provider': u'ifca-sso', 'group_ids': [u'6d540e81a3d54a46bae19df707a20574'], 'user_id': u'd5a8b27b3ca94b12a179017594b9102c'}
+    return response_data
+
 #this method has been copied from mapped.py
 def extract_assertion_data(request):
     assertion = dict(utils.get_assertion_params_from_env(request))
@@ -186,9 +298,7 @@ def extract_assertion_data(request):
 def apply_mapping_filter(identity_provider, protocol, assertion,
                          resource_api, federation_api, identity_api):
     idp = federation_api.get_idp(identity_provider)
-    utils.validate_idp(idp, protocol, assertion)
-
-    LOG.debug("Estoy en apply_mapping_filter con identity_provider: %s, protocol: %s y assertion: %s", identity_provider,protocol,assertion)
+    #utils.validate_idp(idp, protocol, assertion)
     mapped_properties, mapping_id = federation_api.evaluate(
         identity_provider, protocol, assertion)
     # NOTE(marek-denis): We update group_ids only here to avoid fetching
@@ -197,8 +307,15 @@ def apply_mapping_filter(identity_provider, protocol, assertion,
     # corresponding ids in the auth plugin, as we need information what
     # ``mapping_id`` was used as well as idenity_api and resource_api
     # objects.
+    #group_ids = mapped_properties['group_ids']
+    #LOG.debug("Estoy en apply_mapping_filter con group_ids", group_ids)
+    #utils.validate_mapped_group_ids(group_ids, mapping_id, identity_api)
+    #group_ids.extend(
+    #    utils.transform_to_group_ids(
+    #        mapped_properties['group_names'], mapping_id,
+    #        identity_api, resource_api))
+    #mapped_properties['group_ids'] = list(set(group_ids))
     group_ids = mapped_properties['group_ids']
-    LOG.debug("Estoy en apply_mapping_filter con group_ids", group_ids)
     utils.validate_mapped_group_ids(group_ids, mapping_id, identity_api)
     group_ids.extend(
         utils.transform_to_group_ids(
