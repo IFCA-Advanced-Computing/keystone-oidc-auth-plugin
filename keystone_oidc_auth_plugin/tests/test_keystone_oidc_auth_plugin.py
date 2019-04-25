@@ -19,15 +19,9 @@ test_keystone_oidc_auth_plugin
 Tests for `keystone_oidc_auth_plugin` module.
 """
 
-import uuid
 
-import keystone.conf
-from keystone.tests.unit import test_auth_plugin as ks_test_auth_plugin
 from keystone.tests.unit.ksfixtures import auth_plugins
-
-import mock
-
-from keystone_oidc_auth_plugin.tests import base
+from keystone.tests.unit import test_auth_plugin as ks_test_auth_plugin
 
 
 class TestKeystone_oidc_auth_plugin(ks_test_auth_plugin.TestMapped):
