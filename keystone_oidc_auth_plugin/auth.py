@@ -14,44 +14,45 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from keystone.auth.plugins import mapped as ks_mapped
+from keystone.auth import plugins as auth_plugins
 from keystone.auth.plugins import base
+from keystone.auth.plugins import mapped as ks_mapped
 from keystone.common import provider_api
 from keystone import exception
 from keystone.federation import constants as federation_constants
 from keystone.federation import utils
 from keystone import notifications
 
-from pycadf import cadftaxonomy as taxonomy
-
-from oslo_log import log
-from oslo_config import cfg
-
 from oic.oic import Client
 from oic.utils.authn.client import CLIENT_AUTHN_METHOD
-from oic.utils.http_util import Redirect
-from oic import rndstr
-from oic.oic.message import AuthorizationResponse
-from oic.oic.message import ProviderConfigurationResponse
-from pymemcache.client.base import Client as Client_mem
+
+from oslo_config import cfg
+from oslo_log import log
+
+from pycadf import cadftaxonomy as taxonomy
+
 import keystone.conf
 import six
-import requests
 
 LOG = log.getLogger(__name__)
+
+METHOD_NAME = 'oidc'
 
 CONF = keystone.conf.CONF
 PROVIDERS = provider_api.ProviderAPIs
 
 opts = [
-    cfg.DictOpt("iss",
-               default={},
-               help="OpenID connect issuer (identity_provider:iss)"),
-    cfg.DictOpt("client_id",
-               default={},
-               help="OpenID Connect client_id (identity_provider:client_id"),
+    cfg.DictOpt(
+        "iss",
+        default={},
+        help="OpenID connect issuer (identity_provider:iss)"),
+    cfg.DictOpt(
+        "client_id",
+        default={},
+        help="OpenID Connect client_id (identity_provider:client_id"),
 ]
 CONF.register_opts(opts, group="oidc")
+
 
 class OpenIDConnect(ks_mapped.Mapped):
     """Provide OpenID Connect authentication.
@@ -65,15 +66,11 @@ class OpenIDConnect(ks_mapped.Mapped):
     """
     def authenticate(self, request, auth_payload):
         assertion = extract_assertion_data(request)
-        #TODO Copied from mapped
+        # TODO(aguilarf) Copied from mapped
         if 'id' in auth_payload:
             LOG.debug("No token received")
-            token_ref = self._get_token_ref(auth_payload)
-            response_data = handle_scoped_token(request,
-                                                token_ref,
-                                                PROVIDERS.federation_api,
-                                                PROVIDERS.identity_api)
-        #TODO We need to change this. The first request won't have a Bearer, but this is for testing
+
+        # TODO(aguilarf) The first request won't have a Bearer. Testing
         if 'Bearer' in assertion["HTTP_AUTHORIZATION"]:
             LOG.debug("Bearer token received")
             response_data = handle_unscoped_token(request,
@@ -86,7 +83,10 @@ class OpenIDConnect(ks_mapped.Mapped):
         else:
             LOG.debug("Unknown request")
 
-        return base.AuthHandlerResponse(status=True, response_body=None,response_data=response_data)
+        return base.AuthHandlerResponse(status=True,
+                                        response_body=None,
+                                        response_data=response_data)
+
 
 def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
                           identity_api, assignment_api, role_api):
@@ -105,7 +105,7 @@ def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
                         'exist before assignment.',
                         shadow_role['name']
                     )
-                 # NOTE(lbragstad): The RoleNotFound exception usually
+                    # NOTE(lbragstad): The RoleNotFound exception usually
                     # expects a role_id as the parameter, but in this case we
                     # only have a name so we'll pass that instead.
                     raise exception.RoleNotFound(shadow_role['name'])
@@ -140,7 +140,7 @@ def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
                      'user_id': user['id']}
                 )
                 project_ref = {
-                    'id': uuid.uuid4().hex,
+                    'id': user['id'],
                     'name': shadow_project['name'],
                     'domain_id': idp_domain_id
                 }
@@ -157,9 +157,8 @@ def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
                     project_id=project['id']
                 )
 
-
     def is_ephemeral_user(mapped_properties):
-        return mapped_properties['user']['type'] == utils.UserType.EPHEMERAL 
+        return mapped_properties['user']['type'] == utils.UserType.EPHEMERAL
 
     def build_ephemeral_user_context(user, mapped_properties,
                                      identity_provider, protocol):
@@ -181,7 +180,7 @@ def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
 
     assertion = extract_assertion_data(request)
 
-    #Target mapped????
+    # Target mapped????
     try:
         identity_provider = auth_payload['identity_provider']
     except KeyError:
@@ -203,20 +202,20 @@ def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
     # operation will not be mapped to any user (even ephemeral).
     user_id = None
     client = Client(client_authn_method=CLIENT_AUTHN_METHOD)
-    #TODO it should go in the keystone config file.
-    args = { 
-         "iss" : CONF.oidc.iss[identity_provider],
-         "client_id": CONF.oidc.client_id[identity_provider]
-         }
+    # TODO(aguilarf) it should go in the keystone config file.
+    args = {"iss": CONF.oidc.iss[identity_provider],
+            "client_id": CONF.oidc.client_id[identity_provider]}
     client.client_id = args['client_id']
     client.provider_config(args['iss'])
-    access_token = str(assertion["HTTP_AUTHORIZATION"])[str(assertion["HTTP_AUTHORIZATION"]).index('Bearer ') + len('Bearer '):]
+    access_token = str(assertion["HTTP_AUTHORIZATION"])[
+        str(assertion["HTTP_AUTHORIZATION"]).index('Bearer ')
+        + len('Bearer '):]
     userinfo = client.do_user_info_request(access_token=access_token)
     assertion = {n: v.split(';') for n, v in userinfo.items()
-                     if isinstance(v, six.string_types)}
+                 if isinstance(v, six.string_types)}
     unique_id = assertion['sub']
     display_name = assertion['name']
-    assertion = userinfo  
+    assertion = userinfo
     try:
         try:
             mapped_properties, mapping_id = apply_mapping_filter(
@@ -228,8 +227,8 @@ def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
             raise exception.Unauthorized(e)
 
         if is_ephemeral_user(mapped_properties):
-            #TODO we need a way to get the state, that is provided in the URL itself
-            #TODO if there is no state, then error
+            # TODO(aguilarf) Way to get state needed. Provided in URL itself
+            # TODO(aguilarf) if there is no state, then error
             user = identity_api.shadow_federated_user(identity_provider,
                                                       protocol, unique_id,
                                                       display_name)
@@ -290,15 +289,17 @@ def handle_unscoped_token(request, auth_payload, resource_api, federation_api,
 
     return response_data
 
-#this method has been copied from mapped.py
+
+# This method has been copied from mapped.py
 def extract_assertion_data(request):
     assertion = dict(utils.get_assertion_params_from_env(request))
     return assertion
 
+
 def apply_mapping_filter(identity_provider, protocol, assertion,
                          resource_api, federation_api, identity_api):
-    idp = federation_api.get_idp(identity_provider)
-    #utils.validate_idp(idp, protocol, assertion)
+    # idp = federation_api.get_idp(identity_provider)
+    # utils.validate_idp(idp, protocol, assertion)
     mapped_properties, mapping_id = federation_api.evaluate(
         identity_provider, protocol, assertion)
     # NOTE(marek-denis): We update group_ids only here to avoid fetching
@@ -307,14 +308,14 @@ def apply_mapping_filter(identity_provider, protocol, assertion,
     # corresponding ids in the auth plugin, as we need information what
     # ``mapping_id`` was used as well as idenity_api and resource_api
     # objects.
-    #group_ids = mapped_properties['group_ids']
-    #LOG.debug("Estoy en apply_mapping_filter con group_ids", group_ids)
-    #utils.validate_mapped_group_ids(group_ids, mapping_id, identity_api)
-    #group_ids.extend(
+    # group_ids = mapped_properties['group_ids']
+    # LOG.debug("Estoy en apply_mapping_filter con group_ids", group_ids)
+    # utils.validate_mapped_group_ids(group_ids, mapping_id, identity_api)
+    # group_ids.extend(
     #    utils.transform_to_group_ids(
     #        mapped_properties['group_names'], mapping_id,
     #        identity_api, resource_api))
-    #mapped_properties['group_ids'] = list(set(group_ids))
+    # mapped_properties['group_ids'] = list(set(group_ids))
     group_ids = mapped_properties['group_ids']
     utils.validate_mapped_group_ids(group_ids, mapping_id, identity_api)
     group_ids.extend(

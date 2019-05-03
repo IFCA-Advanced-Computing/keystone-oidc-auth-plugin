@@ -13,3 +13,5 @@ testtools>=1.4.0 # MIT
 # Required to use Keystone unit tests
 python-ldap>=3.0.0 # PSF
 ldappool>=2.0.0 # MPL
+
+oic

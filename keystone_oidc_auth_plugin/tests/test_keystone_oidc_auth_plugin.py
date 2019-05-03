@@ -28,7 +28,7 @@ class TestKeystone_oidc_auth_plugin(ks_test_auth_plugin.TestMapped):
 
     def test_load_openid_ifca(self):
         self.useFixture(auth_plugins.ConfigAuthPlugins(self.config_fixture,
-                                                       ["openid"],
-                                                       openid="ifca"))
-        self.useFixture(auth_plugins.LoadAuthPlugins("openid"))
-        self._test_mapped_invocation_with_method_name("openid")
+                                                       ["oidc"],
+                                                       oidc="ifca"))
+        self.useFixture(auth_plugins.LoadAuthPlugins("oidc"))
+        self._test_mapped_invocation_with_method_name("oidc")
