@@ -24,25 +24,30 @@ from oic.utils.authn.client import CLIENT_AUTHN_METHOD
 from oslo_config import cfg
 from oslo_log import log
 
+from keystone_oidc_auth_plugin import configuration
+
 LOG = log.getLogger(__name__)
 
 CONF = keystone.conf.CONF
 
 opts = [
-    cfg.DictOpt(
-        "iss",
-        default={},
-        help="OpenID connect issuer (identity_provider:iss)"),
-    cfg.DictOpt(
+    cfg.StrOpt(
+        "issuer",
+        help="OpenID connect issuer."),
+    cfg.StrOpt(
         "client_id",
-        default={},
-        help="OpenID Connect client_id (identity_provider:client_id"),
+        help="Client identifier used in calls to the OpenID Connect Provider"),
+]
+
+global_opts = [
     cfg.StrOpt(
         "claim_prefix",
         default="OIDC_",
-        help="Prefix to use for our claims"),
+        help="The prefix to use when setting claims in the HTTP "
+             "headers/environment variables."),
 ]
-CONF.register_opts(opts, group="openid")
+
+CONF.register_opts(global_opts, group="openid")
 
 
 class InvalidOauthToken(exception.ValidationError):
@@ -60,33 +65,38 @@ class OpenIDConnect(ks_mapped.Mapped):
         openid = ifca
     """
 
-    def get_oidc_client(self, identity_provider):
+    def get_oidc_client(self, conf):
+
         oidc_client = oic.Client(client_authn_method=CLIENT_AUTHN_METHOD)
 
-        oidc_client.client_id = CONF.openid.client_id[identity_provider]
-        oidc_client.provider_config(CONF.openid.iss[identity_provider])
+        oidc_client.client_id = conf.client_id
+        oidc_client.provider_config(conf.issuer)
         return oidc_client
 
     def authenticate(self, auth_payload):
-        assertion = ks_mapped.extract_assertion_data()
-
-        # TODO(aguilarf) The first request won't have a Bearer. Testing
-        if 'Bearer' in assertion["HTTP_AUTHORIZATION"]:
-            LOG.debug("Bearer token received, using OAuth token")
-
-            self.handle_bearer(auth_payload, assertion)
-        else:
-            pass
-        return super(OpenIDConnect, self).authenticate(auth_payload)
-
-    def handle_bearer(self, auth_payload, assertion):
         try:
             identity_provider = auth_payload['identity_provider']
         except KeyError:
             raise exception.ValidationError(
                 attribute='identity_provider', target='mapped')
 
-        oidc_client = self.get_oidc_client(identity_provider)
+        conf = configuration.Configuration(opts,
+                                           "openid_%s" % identity_provider)
+
+        assertion = ks_mapped.extract_assertion_data()
+
+        # TODO(aguilarf) The first request won't have a Bearer. Testing
+        if 'Bearer' in assertion["HTTP_AUTHORIZATION"]:
+            LOG.debug("Bearer token received, using OAuth token")
+
+            self.handle_bearer(auth_payload, assertion, conf)
+        else:
+            pass
+
+        return super(OpenIDConnect, self).authenticate(auth_payload)
+
+    def handle_bearer(self, auth_payload, assertion, conf):
+        oidc_client = self.get_oidc_client(conf)
 
         access_token = assertion["HTTP_AUTHORIZATION"].split(":")[-1]
         if not access_token.startswith("Bearer "):
@@ -95,7 +105,7 @@ class OpenIDConnect(ks_mapped.Mapped):
 
         # TODO(aguilarf): validate token first!!
         claims = oidc_client.do_user_info_request(access_token=access_token)
-        claims["iss"] = CONF.openid.iss[identity_provider]
+        claims["iss"] = conf.issuer
 
         # We set here the ENV variables that are needed for the assertion to be
         # consumed downstream, and we are done
