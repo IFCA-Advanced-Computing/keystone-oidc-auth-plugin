@@ -33,7 +33,12 @@ CONF = keystone.conf.CONF
 opts = [
     cfg.StrOpt(
         "issuer",
-        help="OpenID connect issuer."),
+        help="OpenID connect issuer URL. We will use this to build all the "
+             "required options asking the discovery url (i.e. querying the "
+             "$issuer/.well-known/openid-configuration endpoint. This has "
+             "to correspond to the 'remote-id' parameter that is set in the "
+             "federated identity provider configuration that is configured "
+             "in Keystone."),
     cfg.StrOpt(
         "client_id",
         help="Client identifier used in calls to the OpenID Connect Provider"),
@@ -45,6 +50,11 @@ global_opts = [
         default="OIDC_",
         help="The prefix to use when setting claims in the HTTP "
              "headers/environment variables."),
+    cfg.StrOpt(
+        'remote_id_attribute',
+        default="OIDC_iss",
+        help="Value to be used to obtain the entity ID of the Identity "
+             "Provider from the environment. Defaults to OIDC_iss."),
 ]
 
 CONF.register_opts(global_opts, group="openid")
