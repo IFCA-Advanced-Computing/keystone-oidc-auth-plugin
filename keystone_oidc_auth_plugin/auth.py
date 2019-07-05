@@ -73,35 +73,39 @@ class OpenIDConnect(ks_mapped.Mapped):
         oidc_client.provider_config(conf.issuer)
         return oidc_client
 
-    def authenticate(self, auth_payload):
+    def _get_idp_from_payload(self, auth_payload):
         try:
             identity_provider = auth_payload['identity_provider']
         except KeyError:
             raise exception.ValidationError(
                 attribute='identity_provider', target='mapped')
 
-        conf = configuration.Configuration(opts,
-                                           "openid_%s" % identity_provider)
+        return identity_provider
 
+    def authenticate(self, auth_payload):
         assertion = ks_mapped.extract_assertion_data()
 
         # TODO(aguilarf) The first request won't have a Bearer. Testing
-        if 'Bearer' in assertion["HTTP_AUTHORIZATION"]:
+        if 'Bearer' in assertion.get("HTTP_AUTHORIZATION", ""):
             LOG.debug("Bearer token received, using OAuth token")
 
-            self.handle_bearer(auth_payload, assertion, conf)
+            access_token = assertion["HTTP_AUTHORIZATION"].split(":")[-1]
+            if not access_token.startswith("Bearer "):
+                raise InvalidOauthToken()
+            access_token = access_token[7:]
+
+            self.handle_bearer(auth_payload, access_token)
         else:
             pass
 
         return super(OpenIDConnect, self).authenticate(auth_payload)
 
-    def handle_bearer(self, auth_payload, assertion, conf):
-        oidc_client = self.get_oidc_client(conf)
+    def handle_bearer(self, auth_payload, access_token):
+        identity_provider = self._get_idp_from_payload(auth_payload)
 
-        access_token = assertion["HTTP_AUTHORIZATION"].split(":")[-1]
-        if not access_token.startswith("Bearer "):
-            raise InvalidOauthToken()
-        access_token = access_token[7:]
+        conf = configuration.Configuration(opts,
+                                           "openid_%s" % identity_provider)
+        oidc_client = self.get_oidc_client(conf)
 
         # TODO(aguilarf): validate token first!!
         claims = oidc_client.do_user_info_request(access_token=access_token)
