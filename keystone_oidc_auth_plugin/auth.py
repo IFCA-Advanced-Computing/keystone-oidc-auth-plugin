@@ -14,6 +14,8 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import time
+
 import flask
 import jwkest
 from keystone.auth.plugins import mapped as ks_mapped
@@ -58,6 +60,11 @@ global_opts = [
         default="OIDC_iss",
         help="Value to be used to obtain the entity ID of the Identity "
              "Provider from the environment. Defaults to OIDC_iss."),
+    cfg.IntOpt(
+        "jws_refresh_interval",
+        default=3600,
+        help="Default duration in seconds after which retrieved JWS should "
+             "be refreshed."),
 ]
 
 CONF.register_opts(global_opts, group="openid")
@@ -78,14 +85,38 @@ class OpenIDConnect(ks_mapped.Mapped):
         openid = ifca
     """
 
-    def get_oidc_client(self, conf):
+    def __init__(self, *args, **kwargs):
+        super(OpenIDConnect, self).__init__(*args, **kwargs)
 
-        oidc_client = oic.Client(
-            client_authn_method=utils_client.CLIENT_AUTHN_METHOD
-        )
+        # Dictionary to store the clients, we will store here a tuple for each
+        # of the clients, with the first element being the timestamp when the
+        # client was created, the second the client itself.
+        self._clients = {}
 
-        oidc_client.client_id = conf.client_id
-        oidc_client.provider_config(conf.issuer)
+    def get_oidc_client(self, idp):
+        created_at, oidc_client = self._clients.get(idp, (0, None))
+
+        now = int(time.time())
+        refresh_interval = CONF.openid.jws_refresh_interval
+
+        # Create client if we do not have one
+        if oidc_client is None:
+            conf = configuration.Configuration(opts, "openid_%s" % idp)
+
+            oidc_client = oic.Client(
+                client_authn_method=utils_client.CLIENT_AUTHN_METHOD
+            )
+
+            oidc_client.client_id = conf.client_id
+            self._clients[idp] = (now, oidc_client)
+
+        # Refresh the provider configuration if the interval has passed. This
+        # will trigger an update of the keyjar
+        if now - created_at >= refresh_interval:
+            # FIXME(aloga): check here that the issuer and whatnot is set,
+            # otherwise raise an error
+            oidc_client.provider_config(conf.issuer)
+
         return oidc_client
 
     def _get_idp_from_payload(self, auth_payload):
@@ -126,9 +157,7 @@ class OpenIDConnect(ks_mapped.Mapped):
     def handle_bearer(self, auth_payload, access_token):
         identity_provider = self._get_idp_from_payload(auth_payload)
 
-        conf = configuration.Configuration(opts,
-                                           "openid_%s" % identity_provider)
-        oidc_client = self.get_oidc_client(conf)
+        oidc_client = self.get_oidc_client(identity_provider)
 
         # Validate the JSON Web Token
         jwt_hdl = jwt.JWT(oidc_client.keyjar)

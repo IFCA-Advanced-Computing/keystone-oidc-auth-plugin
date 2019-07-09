@@ -37,6 +37,10 @@ Then, you can configure the global OpenID Connect specific options as follows:
     # environment. Defaults to OIDC_iss. (string value)
     #remote_id_attribute = OIDC_iss
 
+    # Default duration in seconds after which retrieved JWS should be refreshed.
+    # (integer value)
+    #jws_refresh_interval = 3600
+
 Finally, you need to add a section for each of the Identity Providers (IdP)
 that you want to support. In order to do so, the plugin looks for IdP entries
 that are prefixed by `openid_`. The IdP name that you use for each of these
