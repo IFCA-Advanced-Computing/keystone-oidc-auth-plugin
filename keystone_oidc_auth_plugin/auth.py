@@ -19,8 +19,9 @@ from keystone.auth.plugins import mapped as ks_mapped
 import keystone.conf
 from keystone import exception
 from keystone.i18n import _
+import oic.exception
 from oic import oic
-from oic.utils.authn.client import CLIENT_AUTHN_METHOD
+from oic.utils.authn import client as utils_client
 from oslo_config import cfg
 from oslo_log import log
 
@@ -61,7 +62,7 @@ CONF.register_opts(global_opts, group="openid")
 
 
 class InvalidOauthToken(exception.ValidationError):
-    message_format = _('No valid OAuth 2.0 token has been found.')
+    message_format = _('No valid OAuth 2.0 token has been found in headers.')
 
 
 class OpenIDConnect(ks_mapped.Mapped):
@@ -77,7 +78,9 @@ class OpenIDConnect(ks_mapped.Mapped):
 
     def get_oidc_client(self, conf):
 
-        oidc_client = oic.Client(client_authn_method=CLIENT_AUTHN_METHOD)
+        oidc_client = oic.Client(
+            client_authn_method=utils_client.CLIENT_AUTHN_METHOD
+        )
 
         oidc_client.client_id = conf.client_id
         oidc_client.provider_config(conf.issuer)
@@ -99,10 +102,13 @@ class OpenIDConnect(ks_mapped.Mapped):
         if 'Bearer' in assertion.get("HTTP_AUTHORIZATION", ""):
             LOG.debug("Bearer token received, using OAuth token")
 
-            access_token = assertion["HTTP_AUTHORIZATION"].split(":")[-1]
-            if not access_token.startswith("Bearer "):
+            bearer = utils_client.BearerHeader()
+            try:
+                # Beware: BearerHeader.verify() only verifies that the
+                # assertion is there, but not its actual validity!
+                access_token = bearer.verify(assertion)
+            except oic.exception.AuthnFailure:
                 raise InvalidOauthToken()
-            access_token = access_token[7:]
 
             self.handle_bearer(auth_payload, access_token)
         else:
