@@ -15,6 +15,7 @@
 # under the License.
 
 import flask
+import jwkest
 from keystone.auth.plugins import mapped as ks_mapped
 import keystone.conf
 from keystone import exception
@@ -22,6 +23,7 @@ from keystone.i18n import _
 import oic.exception
 from oic import oic
 from oic.utils.authn import client as utils_client
+from oic.utils import jwt
 from oslo_config import cfg
 from oslo_log import log
 
@@ -98,7 +100,12 @@ class OpenIDConnect(ks_mapped.Mapped):
     def authenticate(self, auth_payload):
         assertion = ks_mapped.extract_assertion_data()
 
-        # TODO(aguilarf) The first request won't have a Bearer. Testing
+        # Handle Bearer auth, this is not "pure" OpenID Connect but it is
+        # required to work with the current keystoneauth1 code, that allows
+        # users to register the OpenStack CLI as an OpenID Connect client,
+        # therefore they will only present the Oauth 2.0 token. In order to
+        # support this we need to use this token to get the user_info claims
+        # from the IdP.
         if 'Bearer' in assertion.get("HTTP_AUTHORIZATION", ""):
             LOG.debug("Bearer token received, using OAuth token")
 
@@ -123,9 +130,15 @@ class OpenIDConnect(ks_mapped.Mapped):
                                            "openid_%s" % identity_provider)
         oidc_client = self.get_oidc_client(conf)
 
-        # TODO(aguilarf): validate token first!!
+        # Validate the JSON Web Token
+        jwt_hdl = jwt.JWT(oidc_client.keyjar)
+        try:
+            token = jwt_hdl.unpack(access_token)
+        except jwkest.JWKESTException as e:
+            raise InvalidOauthToken(e.__doc__)
+
         claims = oidc_client.do_user_info_request(access_token=access_token)
-        claims["iss"] = conf.issuer
+        claims["iss"] = token["iss"]
 
         # We set here the ENV variables that are needed for the assertion to be
         # consumed downstream, and we are done
