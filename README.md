@@ -59,3 +59,22 @@ follows:
 
     # Client identifier used in calls to the OpenID Connect Provider (string value)
     #client_id = <None>
+
+    # OpenID connect issuer URL. We will use this to build all the in Keystone.
+    # (string value)
+    #authorization_endpoint = <None>
+
+    # Client identifier only known by the application and Identity provider client
+    # (string value)
+    #client_secret = <None>
+
+    # Supported OpenID scopes in the Identity provider (string value)
+    #scope = <None>
+
+    # OpenID connect URL to get identity and access tokens (string value)
+    #token_endpoint = <None>
+
+    # Application (keystone) URL to post Identity provider and user information
+    # (string value)
+    #redirect_uri = <None>
+
