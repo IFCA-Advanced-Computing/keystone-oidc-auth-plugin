@@ -65,6 +65,10 @@ opts = [
         "token_endpoint",
         help="OpenID connect URL to get identity and access tokens"),
     cfg.StrOpt(
+        "userinfo_method",
+        default="POST",
+        help="Allowed HTTP method for userinfo request. Default: POST"),
+    cfg.StrOpt(
         "redirect_uri",
         help="Application (keystone) URL to post Identity provider and user "
              "information"),
@@ -185,7 +189,8 @@ class OpenIDConnect(ks_mapped.Mapped):
 
     def handle_bearer(self, auth_payload, access_token):
         identity_provider = self._get_idp_from_payload(auth_payload)
-
+        conf = configuration.Configuration(opts,
+                                           "openid_%s" % identity_provider)
         oidc_client = self.get_oidc_client(identity_provider)
 
         # Validate the JSON Web Token
@@ -195,7 +200,8 @@ class OpenIDConnect(ks_mapped.Mapped):
         except jwkest.JWKESTException as e:
             raise InvalidOauthToken(e.__doc__)
 
-        claims = oidc_client.do_user_info_request(access_token=access_token)
+        method = conf.userinfo_method
+        claims = oidc_client.do_user_info_request(access_token=access_token,method=method)
         claims["iss"] = token["iss"]
 
         # We set here the ENV variables that are needed for the assertion to be
@@ -215,10 +221,9 @@ class OpenIDConnect(ks_mapped.Mapped):
             "response_type": 'code',
             "client_id": conf.client_id,
             "authorization_endpoint": conf.authorization_endpoint,
-            "client_secret": conf.client_secret,
             "token_endpoint": conf.token_endpoint,
             "redirect_uri": conf.redirect_uri,
-            "scope": provider_info["scopes_supported"],
+            "scope": conf.scope,
             "nonce": session["nonce"],
             "state": session["state"],
             }
