@@ -23,11 +23,11 @@ import keystone.conf
 from keystone import exception
 from keystone.i18n import _
 
-import oic.exception
 from oic import oic
 from oic.oic.message import AuthorizationResponse
 from oic.utils.authn import client as utils_client
 from oic.utils import jwt
+from oic import exception as oic_exception
 
 from oslo_config import cfg
 from oslo_log import log
@@ -169,7 +169,7 @@ class OpenIDConnect(ks_mapped.Mapped):
                 # Beware: BearerHeader.verify() only verifies that the
                 # assertion is there, but not its actual validity!
                 access_token = bearer.verify(assertion)
-            except oic.exception.AuthnFailure:
+            except oic_exception.AuthnFailure:
                 raise InvalidOauthToken()
 
             self.handle_bearer(auth_payload, access_token)
@@ -201,7 +201,15 @@ class OpenIDConnect(ks_mapped.Mapped):
             raise InvalidOauthToken(e.__doc__)
 
         method = conf.userinfo_method
-        claims = oidc_client.do_user_info_request(access_token=access_token,method=method)
+        if method is None:
+            try:
+                claims = oidc_client.do_user_info_request(access_token=access_token,method="POST")
+            except oic_exception.RequestError:
+                claims = oidc_client.do_user_info_request(access_token=access_token,method="GET")
+
+        else:
+            claims = oidc_client.do_user_info_request(access_token=access_token,method=method)
+
         claims["iss"] = token["iss"]
 
         # We set here the ENV variables that are needed for the assertion to be
