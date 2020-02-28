@@ -66,8 +66,7 @@ opts = [
         help="OpenID connect URL to get identity and access tokens"),
     cfg.StrOpt(
         "userinfo_method",
-        default="POST",
-        help="Allowed HTTP method for userinfo request. Default: POST"),
+        help="Allowed HTTP method for userinfo request. Optional"),
     cfg.StrOpt(
         "redirect_uri",
         help="Application (keystone) URL to post Identity provider and user "
