@@ -74,6 +74,9 @@ follows:
     # OpenID connect URL to get identity and access tokens (string value)
     #token_endpoint = <None>
 
+    # Allowed HTTP method for userinfo request. Optional.
+    #userinfo_method = POST
+
     # Application (keystone) URL to post Identity provider and user information
     # (string value)
     #redirect_uri = <None>
