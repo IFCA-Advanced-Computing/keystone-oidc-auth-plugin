@@ -22,6 +22,7 @@ from keystone.auth.plugins import mapped as ks_mapped
 import keystone.conf
 from keystone import exception
 from keystone.i18n import _
+from six.moves.urllib import parse as urlparse
 
 from oic import oic
 from oic.oic.message import AuthorizationResponse
@@ -176,8 +177,8 @@ class OpenIDConnect(ks_mapped.Mapped):
             return super(OpenIDConnect, self).authenticate(auth_payload)
         # Get a new token based on config
         else:
-            if ('QUERY_STRING' in flask.request.environ and
-                    'code' in flask.request.environ['QUERY_STRING']):
+            query = urlparse.parse_qs(flask.request.environ["QUERY_STRING"])
+            if "code" in query:
                 access_token = self.get_access_token(auth_payload, assertion)
                 self.handle_bearer(auth_payload, access_token)
                 return super(OpenIDConnect, self).authenticate(auth_payload)
