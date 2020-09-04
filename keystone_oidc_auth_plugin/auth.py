@@ -144,6 +144,12 @@ class OpenIDConnect(ks_mapped.Mapped):
 
         return oidc_client
 
+    def _get_redirect_uri(self, conf):
+        query = urlparse.parse_qs(flask.request.environ["QUERY_STRING"])
+        if query.get("oscli"):
+            return "http://localhost:8080"
+        return conf.redirect_uri
+
     def _get_idp_from_payload(self, auth_payload):
         try:
             identity_provider = auth_payload['identity_provider']
@@ -230,7 +236,7 @@ class OpenIDConnect(ks_mapped.Mapped):
             "client_id": conf.client_id,
             "authorization_endpoint": conf.authorization_endpoint,
             "token_endpoint": conf.token_endpoint,
-            "redirect_uri": conf.redirect_uri,
+            "redirect_uri": self._get_redirect_uri(conf),
             "scope": conf.scope,
             "nonce": session["nonce"],
             "state": session["state"],
@@ -259,7 +265,7 @@ class OpenIDConnect(ks_mapped.Mapped):
             "authorization_endpoint": conf.authorization_endpoint,
             "client_secret": conf.client_secret,
             "token_endpoint": conf.token_endpoint,
-            "redirect_uri": conf.redirect_uri,
+            "redirect_uri": self._get_redirect_uri(conf),
             "scope": conf.scope
             }
         oidc_client.client_id = conf.client_id
