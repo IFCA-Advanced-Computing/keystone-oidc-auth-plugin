@@ -22,16 +22,14 @@ from keystone.auth.plugins import mapped as ks_mapped
 import keystone.conf
 from keystone import exception
 from keystone.i18n import _
-from six.moves.urllib import parse as urlparse
-
+import oic.exception
 import oic.oic
 from oic.oic.message import AuthorizationResponse
 from oic.utils.authn import client as utils_client
 from oic.utils import jwt
-from oic import exception as oic_exception
-
 from oslo_config import cfg
 from oslo_log import log
+from six.moves.urllib import parse as urlparse
 
 from keystone_oidc_auth_plugin import configuration
 
@@ -176,7 +174,7 @@ class OpenIDConnect(ks_mapped.Mapped):
                 # Beware: BearerHeader.verify() only verifies that the
                 # assertion is there, but not its actual validity!
                 access_token = bearer.verify(assertion)
-            except oic_exception.AuthnFailure:
+            except oic.exception.AuthnFailure:
                 raise InvalidOauthToken()
 
             self.handle_bearer(auth_payload, access_token)
@@ -211,7 +209,7 @@ class OpenIDConnect(ks_mapped.Mapped):
             try:
                 claims = client.do_user_info_request(access_token=access_token,
                                                      method="POST")
-            except oic_exception.RequestError:
+            except oic.exception.RequestError:
                 claims = client.do_user_info_request(access_token=access_token,
                                                      method="GET")
 
