@@ -19,7 +19,7 @@ test_keystone_oidc_auth_plugin
 Tests for `keystone_oidc_auth_plugin` module.
 """
 
-import mock
+from unittest import mock
 import uuid
 
 from keystone.api._shared import authentication

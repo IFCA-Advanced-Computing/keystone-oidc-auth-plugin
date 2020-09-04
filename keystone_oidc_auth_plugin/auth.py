@@ -241,7 +241,7 @@ class OpenIDConnect(ks_mapped.Mapped):
             "scope": conf.scope,
             "nonce": session["nonce"],
             "state": session["state"],
-            }
+        }
         auth_req = client.construct_AuthorizationRequest(request_args=args)
         login_url = auth_req.request(client.authorization_endpoint)
 
@@ -267,7 +267,7 @@ class OpenIDConnect(ks_mapped.Mapped):
             "token_endpoint": conf.token_endpoint,
             "redirect_uri": self._get_redirect_uri(conf),
             "scope": conf.scope
-            }
+        }
         client.client_id = conf.client_id
         client.authorization_endpoint = conf.authorization_endpoint
         resp = client.do_access_token_request(state=aresp["state"],
