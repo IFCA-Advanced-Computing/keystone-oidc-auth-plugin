@@ -24,7 +24,7 @@ from keystone import exception
 from keystone.i18n import _
 from six.moves.urllib import parse as urlparse
 
-from oic import oic
+import oic.oic
 from oic.oic.message import AuthorizationResponse
 from oic.utils.authn import client as utils_client
 from oic.utils import jwt
@@ -119,6 +119,8 @@ class OpenIDConnect(ks_mapped.Mapped):
         self._clients = {}
 
     def get_oidc_client(self, idp):
+        conf = configuration.Configuration(opts, "openid_%s" % idp)
+
         created_at, oidc_client = self._clients.get(idp, (0, None))
 
         now = int(time.time())
@@ -126,9 +128,8 @@ class OpenIDConnect(ks_mapped.Mapped):
 
         # Create client if we do not have one
         if oidc_client is None:
-            conf = configuration.Configuration(opts, "openid_%s" % idp)
 
-            oidc_client = oic.Client(
+            oidc_client = oic.oic.Client(
                 client_authn_method=utils_client.CLIENT_AUTHN_METHOD
             )
 
@@ -194,13 +195,12 @@ class OpenIDConnect(ks_mapped.Mapped):
                 raise exception.RedirectRequired(login_url)
 
     def handle_bearer(self, auth_payload, access_token):
-        identity_provider = self._get_idp_from_payload(auth_payload)
-        conf = configuration.Configuration(opts,
-                                           "openid_%s" % identity_provider)
-        oidc_client = self.get_oidc_client(identity_provider)
+        idp = self._get_idp_from_payload(auth_payload)
+        conf = configuration.Configuration(opts, "openid_%s" % idp)
+        client = self.get_oidc_client(idp)
 
         # Validate the JSON Web Token
-        jwt_hdl = jwt.JWT(oidc_client.keyjar)
+        jwt_hdl = jwt.JWT(client.keyjar)
         try:
             token = jwt_hdl.unpack(access_token)
         except jwkest.JWKESTException as e:
@@ -209,12 +209,15 @@ class OpenIDConnect(ks_mapped.Mapped):
         method = conf.userinfo_method
         if method is None:
             try:
-                claims = oidc_client.do_user_info_request(access_token=access_token,method="POST")
+                claims = client.do_user_info_request(access_token=access_token,
+                                                     method="POST")
             except oic_exception.RequestError:
-                claims = oidc_client.do_user_info_request(access_token=access_token,method="GET")
+                claims = client.do_user_info_request(access_token=access_token,
+                                                     method="GET")
 
         else:
-            claims = oidc_client.do_user_info_request(access_token=access_token,method=method)
+            claims = client.do_user_info_request(access_token=access_token,
+                                                 method=method)
 
         claims["iss"] = token["iss"]
 
@@ -223,12 +226,10 @@ class OpenIDConnect(ks_mapped.Mapped):
         set_env_params_from_dict(claims)
 
     def handle_access_token(self, auth_payload):
-        client = oic.Client(
-            client_authn_method=utils_client.CLIENT_AUTHN_METHOD,
-            verify_ssl=False)
-        identity_provider = self._get_idp_from_payload(auth_payload)
-        conf = configuration.Configuration(opts,
-                                           "openid_%s" % identity_provider)
+        idp = self._get_idp_from_payload(auth_payload)
+        conf = configuration.Configuration(opts, "openid_%s" % idp)
+        client = self.get_oidc_client(idp)
+
         provider_info = client.provider_config(conf.issuer)
         session = {"nonce": oic.rndstr(), "state": oic.rndstr()}
         args = {
@@ -247,17 +248,16 @@ class OpenIDConnect(ks_mapped.Mapped):
         return login_url
 
     def get_access_token(self, auth_payload, assertion):
-        identity_provider = self._get_idp_from_payload(auth_payload)
-        oidc_client = self.get_oidc_client(identity_provider)
+        idp = self._get_idp_from_payload(auth_payload)
+        conf = configuration.Configuration(opts, "openid_%s" % idp)
+        client = self.get_oidc_client(idp)
 
         LOG.debug("Lets assert response")
         response = flask.request.environ["QUERY_STRING"]
 
-        conf = configuration.Configuration(opts,
-                                           "openid_%s" % identity_provider)
         LOG.debug('Create aresp')
-        aresp = oidc_client.parse_response(AuthorizationResponse,
-                                           info=response, sformat="urlencoded")
+        aresp = client.parse_response(AuthorizationResponse,
+                                      info=response, sformat="urlencoded")
         code = aresp["code"]
         args = {
             "code": code,
@@ -268,13 +268,13 @@ class OpenIDConnect(ks_mapped.Mapped):
             "redirect_uri": self._get_redirect_uri(conf),
             "scope": conf.scope
             }
-        oidc_client.client_id = conf.client_id
-        oidc_client.authorization_endpoint = conf.authorization_endpoint
-        resp = oidc_client.do_access_token_request(state=aresp["state"],
-                                                   request_args=args,
-                                                   authn_method="client"
-                                                                "_secret"
-                                                                "_basic")
+        client.client_id = conf.client_id
+        client.authorization_endpoint = conf.authorization_endpoint
+        resp = client.do_access_token_request(state=aresp["state"],
+                                              request_args=args,
+                                              authn_method="client"
+                                                           "_secret"
+                                                           "_basic")
         access_token = resp['access_token']
         return access_token
 
