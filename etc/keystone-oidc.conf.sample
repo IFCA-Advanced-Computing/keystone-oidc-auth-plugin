@@ -1,0 +1,55 @@
+[DEFAULT]
+
+
+[openid]
+
+#
+# From keystone_oidc_auth_plugin
+#
+
+# The prefix to use when setting claims in the HTTP headers/environment
+# variables. (string value)
+#claim_prefix = OIDC_
+
+# Value to be used to obtain the entity ID of the Identity Provider from the
+# environment. Defaults to OIDC_iss. (string value)
+#remote_id_attribute = OIDC_iss
+
+# Default duration in seconds after which retrieved JWS should be refreshed.
+# (integer value)
+#jws_refresh_interval = 3600
+
+
+[openid_backend_name]
+
+#
+# From keystone_oidc_auth_plugin
+#
+
+# OpenID connect issuer URL. We will use this to build all the required options
+# asking the discovery url (i.e. querying the $issuer/.well-known/openid-
+# configuration endpoint. This has to correspond to the 'remote-id' parameter
+# that is set in the federated identity provider configuration that is
+# configured in Keystone. (string value)
+#issuer = <None>
+
+# Client identifier used in calls to the OpenID Connect Provider (string value)
+#client_id = <None>
+
+# OpenID connect issuer URL. We will use this to build all the in Keystone.
+# (string value)
+#authorization_endpoint = <None>
+
+# Client identifier only known by the application and Identity provider client
+# (string value)
+#client_secret = <None>
+
+# Supported OpenID scopes in the Identity provider (string value)
+#scope = <None>
+
+# OpenID connect URL to get identity and access tokens (string value)
+#token_endpoint = <None>
+
+# Application (keystone) URL to post Identity provider and user information
+# (string value)
+#redirect_uri = <None>
