@@ -228,7 +228,6 @@ class OpenIDConnect(ks_mapped.Mapped):
         conf = configuration.Configuration(opts, "openid_%s" % idp)
         client = self.get_oidc_client(idp)
 
-        provider_info = client.provider_config(conf.issuer)
         session = {"nonce": oic.rndstr(), "state": oic.rndstr()}
         args = {
             "response_type": 'code',
