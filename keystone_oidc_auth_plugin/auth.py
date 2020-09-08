@@ -24,7 +24,7 @@ from keystone import exception
 from keystone.i18n import _
 import oic.exception
 import oic.oic
-from oic.oic.message import AuthorizationResponse
+import oic.oic.message
 from oic.utils.authn import client as utils_client
 from oic.utils import jwt
 from oslo_config import cfg
@@ -253,7 +253,7 @@ class OpenIDConnect(ks_mapped.Mapped):
         response = flask.request.environ["QUERY_STRING"]
 
         LOG.debug('Create aresp')
-        aresp = client.parse_response(AuthorizationResponse,
+        aresp = client.parse_response(oic.oic.message.AuthorizationResponse,
                                       info=response, sformat="urlencoded")
         code = aresp["code"]
         args = {
