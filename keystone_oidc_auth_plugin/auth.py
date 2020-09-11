@@ -196,13 +196,12 @@ class OpenIDConnect(ks_mapped.Mapped):
         idp = self._get_idp_from_payload(auth_payload)
         conf = configuration.Configuration(opts, "openid_%s" % idp)
         client = self.get_oidc_client(idp)
-
         # Validate the JSON Web Token
         jwt_hdl = jwt.JWT(client.keyjar)
         try:
             token = jwt_hdl.unpack(access_token)
-        except jwkest.JWKESTException as e:
-            raise InvalidOauthToken(e.__doc__)
+        except Exception as e:
+            token = dict({"iss": client.issuer})
 
         method = conf.userinfo_method
         if method is None:
