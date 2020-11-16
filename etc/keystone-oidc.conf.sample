@@ -49,7 +49,3 @@
 
 # OpenID connect URL to get identity and access tokens (string value)
 #token_endpoint = <None>
-
-# Application (keystone) URL to post Identity provider and user information
-# (string value)
-#redirect_uri = <None>
