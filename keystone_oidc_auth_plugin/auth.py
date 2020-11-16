@@ -66,10 +66,6 @@ opts = [
     cfg.StrOpt(
         "userinfo_method",
         help="Allowed HTTP method for userinfo request. Optional"),
-    cfg.StrOpt(
-        "redirect_uri",
-        help="Application (keystone) URL to post Identity provider and user "
-             "information"),
 ]
 
 global_opts = [
@@ -147,7 +143,9 @@ class OpenIDConnect(ks_mapped.Mapped):
         query = urlparse.parse_qs(flask.request.environ["QUERY_STRING"])
         if query.get("oscli"):
             return "http://localhost:8080"
-        return conf.redirect_uri
+        origin = flask.request.args.get('origin')
+        origin = urlparse.quote_plus(origin)
+        return flask.request.base_url + f"?origin={origin}"
 
     def _get_idp_from_payload(self, auth_payload):
         try:
