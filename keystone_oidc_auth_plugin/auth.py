@@ -64,6 +64,10 @@ opts = [
         "token_endpoint",
         help="OpenID connect URL to get identity and access tokens"),
     cfg.StrOpt(
+        "userinfo_endpoint",
+        help="OpenID connect UserInfo endpoint URL. This parameter overrides "
+             "UserInfo endpoint discovery."),
+    cfg.StrOpt(
         "userinfo_method",
         help="Allowed HTTP method for userinfo request. Optional"),
 ]
@@ -201,6 +205,7 @@ class OpenIDConnect(ks_mapped.Mapped):
         except Exception as e:
             token = dict({"iss": client.issuer})
 
+        client.userinfo_endpoint = conf.userinfo_endpoint
         method = conf.userinfo_method
         if method is None:
             try:
