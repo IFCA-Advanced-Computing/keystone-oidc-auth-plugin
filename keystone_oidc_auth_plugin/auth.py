@@ -132,6 +132,11 @@ class OpenIDConnect(ks_mapped.Mapped):
             )
 
             oidc_client.client_id = conf.client_id
+            oidc_client.client_secret = conf.client_secret
+            oidc_client.authorization_endpoint = conf.authorization_endpoint
+            oidc_client.token_endpoint = conf.token_endpoint
+            oidc_client.userinfo_endpoint = conf.userinfo_endpoint
+
             self._clients[idp] = (now, oidc_client)
 
         # Refresh the provider configuration if the interval has passed. This
@@ -205,7 +210,6 @@ class OpenIDConnect(ks_mapped.Mapped):
         except Exception as e:
             token = dict({"iss": client.issuer})
 
-        client.userinfo_endpoint = conf.userinfo_endpoint
         method = conf.userinfo_method
         if method is None:
             try:
@@ -233,9 +237,6 @@ class OpenIDConnect(ks_mapped.Mapped):
         session = {"nonce": oic.rndstr(), "state": oic.rndstr()}
         args = {
             "response_type": 'code',
-            "client_id": conf.client_id,
-            "authorization_endpoint": conf.authorization_endpoint,
-            "token_endpoint": conf.token_endpoint,
             "redirect_uri": self._get_redirect_uri(conf),
             "scope": conf.scope,
             "nonce": session["nonce"],
@@ -261,14 +262,9 @@ class OpenIDConnect(ks_mapped.Mapped):
         args = {
             "code": code,
             "client_id": conf.client_id,
-            "authorization_endpoint": conf.authorization_endpoint,
-            "client_secret": conf.client_secret,
-            "token_endpoint": conf.token_endpoint,
             "redirect_uri": self._get_redirect_uri(conf),
             "scope": conf.scope
         }
-        client.client_id = conf.client_id
-        client.authorization_endpoint = conf.authorization_endpoint
         resp = client.do_access_token_request(state=aresp["state"],
                                               request_args=args,
                                               authn_method="client"
