@@ -17,7 +17,6 @@
 import time
 
 import flask
-import jwkest
 from keystone.auth.plugins import mapped as ks_mapped
 import keystone.conf
 from keystone import exception
