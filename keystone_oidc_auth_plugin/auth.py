@@ -207,7 +207,7 @@ class OpenIDConnect(ks_mapped.Mapped):
         jwt_hdl = jwt.JWT(client.keyjar)
         try:
             token = jwt_hdl.unpack(access_token)
-        except Exception as e:
+        except Exception:
             token = dict({"iss": client.issuer})
 
         method = conf.userinfo_method
